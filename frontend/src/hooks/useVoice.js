@@ -1,7 +1,6 @@
 import { useCallback, useRef } from 'react';
 
 export function useVoice() {
-  const lastSpoken = useRef('');
   const cooldowns = useRef({});
 
   const speak = useCallback((text, cooldownMs = 4000) => {
@@ -17,5 +16,9 @@ export function useVoice() {
     window.speechSynthesis.speak(utt);
   }, []);
 
-  return { speak };
+  const stop = useCallback(() => {
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+  }, []);
+
+  return { speak, stop };
 }

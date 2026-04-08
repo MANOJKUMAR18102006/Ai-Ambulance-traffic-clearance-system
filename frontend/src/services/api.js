@@ -19,3 +19,12 @@ export const updateSignalById = (id, data) =>
 
 export const updateSignals = (signals, ambulanceLat, ambulanceLng, routeId) =>
   api.post('/signal', { signals, ambulanceLat, ambulanceLng, routeId }).then((r) => r.data);
+
+export const createAccident = (lat, lng, severity, routeId) =>
+  api.post('/accident', { lat, lng, severity, routeId }).then((r) => r.data);
+
+export const getAccidents = (routeId) =>
+  api.get(`/accident${routeId ? `?routeId=${routeId}` : ''}`).then((r) => r.data);
+
+export const resolveAccident = (id) =>
+  api.put(`/accident/${id}/resolve`).then((r) => r.data);

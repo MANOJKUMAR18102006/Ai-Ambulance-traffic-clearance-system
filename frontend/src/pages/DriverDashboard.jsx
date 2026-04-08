@@ -4,12 +4,29 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import Dashboard from './Dashboard';
 
-const STATUS_OPTIONS = ['IDLE', 'EMERGENCY', 'ON_DUTY'];
-const statusColors = {
-  IDLE: 'border-slate-600 text-slate-300 bg-slate-700/40',
-  EMERGENCY: 'border-red-600 text-red-300 bg-red-900/40',
-  ON_DUTY: 'border-emerald-600 text-emerald-300 bg-emerald-900/40',
-};
+const STATUS_OPTIONS = [
+  {
+    value: 'IDLE',
+    label: 'Idle',
+    icon: '⚪',
+    idle:   'border-slate-600 text-slate-400 bg-slate-800/60 hover:brightness-125',
+    active: 'border-slate-400 text-white bg-slate-700',
+  },
+  {
+    value: 'ON_DUTY',
+    label: 'On Duty',
+    icon: '🟢',
+    idle:   'border-emerald-800 text-emerald-600 bg-emerald-900/20 hover:brightness-125',
+    active: 'border-emerald-500 text-emerald-300 bg-emerald-900/40',
+  },
+  {
+    value: 'EMERGENCY',
+    label: 'Emergency',
+    icon: '🔴',
+    idle:   'border-red-800 text-red-600 bg-red-900/20 hover:brightness-125',
+    active: 'border-red-500 text-red-300 bg-red-900/40 animate-pulse',
+  },
+];
 
 export default function DriverDashboard() {
   const { user, logout } = useAuth();
@@ -20,65 +37,111 @@ export default function DriverDashboard() {
   const fetchAmbulance = useCallback(async () => {
     try {
       const { data } = await axios.get('/api/ambulance/mine');
-      setAmbulance(data);
+      setAmbulance({ ...data, status: 'IDLE' });
     } catch (_) {}
   }, []);
 
   useEffect(() => { fetchAmbulance(); }, [fetchAmbulance]);
 
-  const updateStatus = async (status) => {
+  // Manual status change from buttons
+  const updateStatus = useCallback(async (status) => {
+    if (updating || ambulance?.status === status) return;
     setUpdating(true);
     try {
       const { data } = await axios.put('/api/ambulance/mine', { status });
       setAmbulance(data);
-    } catch (_) {}
-    finally { setUpdating(false); }
-  };
+    } catch (_) {
+      setAmbulance((prev) => prev ? { ...prev, status } : prev);
+    } finally { setUpdating(false); }
+  }, [updating, ambulance?.status]);
 
-  // Called by simulation to sync ambulance location to backend
-  const syncLocation = useCallback(async (lat, lng, eta = 0) => {
+  // Automatic status change from simulation (Activate Green Corridor / Stop / Arrived)
+  const handleSimulationStateChange = useCallback(async (status, routeId) => {
     try {
-      await axios.put('/api/ambulance/mine', {
-        location: { lat, lng },
-        eta,
-        status: 'EMERGENCY',
+      const { data } = await axios.put('/api/ambulance/mine', {
+        status,
+        routeId: routeId || null,
       });
+      setAmbulance(data);
+    } catch (_) {
+      setAmbulance((prev) => prev ? { ...prev, status } : prev);
+    }
+  }, []);
+
+  const syncLocation = useCallback(async (lat, lng, arrived = false) => {
+    try {
+      if (arrived) {
+        const { data } = await axios.put('/api/ambulance/mine', {
+          location: { lat, lng }, eta: 0, status: 'ON_DUTY',
+        });
+        setAmbulance(data);
+      } else {
+        await axios.put('/api/ambulance/mine', { location: { lat, lng } });
+      }
     } catch (_) {}
   }, []);
 
-  const handleLogout = () => { logout(); navigate('/login'); };
+  const currentStatus = ambulance?.status || 'IDLE';
+  const isEmergency = currentStatus === 'EMERGENCY';
 
   return (
-    <div className="flex flex-col h-screen bg-slate-900">
+    <div className="flex flex-col h-screen bg-[#0a0f1e]">
       {/* Driver top bar */}
-      <div className="flex items-center justify-between px-6 py-2 bg-slate-800 border-b border-slate-700 shrink-0">
-        <div className="flex items-center gap-3">
-          <span className="text-xl">🚑</span>
-          <div>
-            <span className="text-sm font-semibold text-white">{ambulance?.ambulanceId || 'Loading...'}</span>
-            <span className="text-xs text-slate-400 ml-2">Driver: {user?.name}</span>
+      <header className={`flex items-center justify-between px-6 py-2.5 border-b shrink-0 transition-colors
+        ${isEmergency ? 'bg-red-950/80 border-red-800/60' : 'bg-[#0d1b2a] border-white/5'}`}>
+
+        <div className="flex items-center gap-4">
+          {/* Ambulance ID */}
+          <div className="flex items-center gap-2">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-base
+              ${isEmergency ? 'bg-red-600 animate-pulse' : 'bg-blue-700'}`}>
+              🚑
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-white">
+                  {ambulance?.ambulanceId || '...'}
+                </span>
+                {isEmergency && (
+                  <span className="text-xs bg-red-600 text-white px-2 py-0.5 rounded-full font-bold animate-pulse">
+                    EMERGENCY
+                  </span>
+                )}
+              </div>
+              <span className="text-xs text-slate-500">👤 {user?.name}</span>
+            </div>
+          </div>
+
+          <div className="w-px h-8 bg-white/10" />
+
+          {/* Status buttons — manual + reflects automatic changes */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-slate-600 mr-1">Status:</span>
+            {STATUS_OPTIONS.map((s) => (
+              <button
+                key={s.value}
+                onClick={() => updateStatus(s.value)}
+                disabled={updating}
+                className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-all disabled:opacity-50
+                  ${currentStatus === s.value ? s.active : s.idle}`}>
+                {s.icon} {s.label}
+              </button>
+            ))}
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Status buttons */}
-          {STATUS_OPTIONS.map((s) => (
-            <button key={s} onClick={() => updateStatus(s)} disabled={updating || ambulance?.status === s}
-              className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors
-                ${ambulance?.status === s ? statusColors[s] : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}>
-              {s === 'IDLE' ? '⚪ IDLE' : s === 'EMERGENCY' ? '🔴 EMERGENCY' : '🟢 ON DUTY'}
-            </button>
-          ))}
-          <button onClick={handleLogout}
-            className="text-xs bg-red-700/40 hover:bg-red-700 text-red-300 px-3 py-1.5 rounded-full border border-red-700 transition-colors ml-1">
-            Logout
-          </button>
-        </div>
-      </div>
+        <button onClick={() => { logout(); navigate('/login'); }}
+          className="text-xs bg-white/5 hover:bg-red-900/40 text-slate-400 hover:text-red-300 px-3 py-1.5 rounded-full border border-white/10 hover:border-red-800 transition-all">
+          Sign Out
+        </button>
+      </header>
 
-      {/* Existing simulation dashboard fills the rest */}
       <div className="flex-1 overflow-hidden">
-        <Dashboard onLocationUpdate={syncLocation} />
+        <Dashboard
+          onLocationUpdate={syncLocation}
+          role="driver"
+          onSimulationStateChange={handleSimulationStateChange}
+        />
       </div>
     </div>
   );

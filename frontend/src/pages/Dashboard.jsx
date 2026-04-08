@@ -9,6 +9,7 @@ import { fetchRoute, fetchHospitals } from '../services/api';
 import { useAmbulanceSimulation } from '../hooks/useAmbulanceSimulation';
 import { useVehicles } from '../hooks/useVehicles';
 import { useVoice } from '../hooks/useVoice';
+import { useAccident } from '../hooks/useAccident';
 
 async function nominatimSearch(q) {
   const { data } = await axios.get('https://nominatim.openstreetmap.org/search', {
@@ -18,7 +19,8 @@ async function nominatimSearch(q) {
   return data;
 }
 
-export default function Dashboard({ onLocationUpdate }) {
+export default function Dashboard({ onLocationUpdate, role = 'driver', onSimulationStateChange }) {
+  const isAdmin = role === 'admin';
   const [startInput, setStartInput] = useState('');
   const [startSuggestions, setStartSuggestions] = useState([]);
   const [start, setStart] = useState(null);
@@ -45,20 +47,38 @@ export default function Dashboard({ onLocationUpdate }) {
   const destTimer = useRef(null);
   const destRef = useRef(null);
 
-  const { speak } = useVoice();
+  const { speak, stop: stopVoice } = useVoice();
   const { vehicles, updateVehicles, reset: resetVehicles } = useVehicles([]);
 
   const showAlert = useCallback((message, type = 'info') => {
     setAlert({ message, type, key: Date.now() });
   }, []);
 
-  const handleVehicleUpdate = useCallback((lat, lng) => {
-    updateVehicles(lat, lng, showAlert, speak);
-    if (onLocationUpdate) onLocationUpdate(lat, lng);
-  }, [updateVehicles, showAlert, speak, onLocationUpdate]);
+  const {
+    accidents, activeAccident, severity, accidentAlertStatus,
+    setSeverity,
+    simulateOnRoute, removeAccident, checkAccidents,
+  } = useAccident(showAlert, routeId);
 
-  const { ambulancePos, stepIndex, isRunning, currentInstruction, start: startSim, stop: stopSim } =
-    useAmbulanceSimulation(routeData, signals, setSignals, showAlert, routeId, handleVehicleUpdate);
+  const handleVehicleUpdate = useCallback((lat, lng, arrived = false) => {
+    updateVehicles(lat, lng, showAlert, speak);
+    if (onLocationUpdate) onLocationUpdate(lat, lng, arrived);
+    if (arrived && onSimulationStateChange) onSimulationStateChange('ON_DUTY', null);
+  }, [updateVehicles, showAlert, speak, onLocationUpdate, onSimulationStateChange]);
+
+  const { ambulancePos, stepIndex, isRunning, currentInstruction, preClearStatus, alertLog, start: startSim, stop: stopSim } =
+    useAmbulanceSimulation(routeData, signals, setSignals, showAlert, routeId, handleVehicleUpdate, checkAccidents);
+
+  const handleStart = useCallback(() => {
+    if (onSimulationStateChange) onSimulationStateChange('EMERGENCY', routeId);
+    startSim();
+  }, [startSim, onSimulationStateChange, routeId]);
+
+  const handleStop = useCallback(() => {
+    stopSim();
+    stopVoice();
+    if (onSimulationStateChange) onSimulationStateChange('IDLE', null);
+  }, [stopSim, stopVoice, onSimulationStateChange]);
 
   // Outside click closes dest dropdown
   useEffect(() => {
@@ -194,9 +214,9 @@ export default function Dashboard({ onLocationUpdate }) {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-slate-900">
+    <div className="flex flex-col h-screen bg-[#0a0f1e]">
       {/* Header */}
-      <header className="flex items-center justify-between px-6 py-3 bg-slate-800 border-b border-slate-700 shrink-0">
+      <header className="flex items-center justify-between px-6 py-3 bg-[#0d1b2a] border-b border-white/5 shrink-0">
         <div className="flex items-center gap-3">
           <span className="text-3xl">🚑</span>
           <div>
@@ -221,27 +241,27 @@ export default function Dashboard({ onLocationUpdate }) {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <aside className="w-80 shrink-0 bg-slate-800 border-r border-slate-700 flex flex-col overflow-y-auto p-4 gap-4">
+        <aside className="w-80 shrink-0 bg-[#0d1b2a] border-r border-white/5 flex flex-col overflow-y-auto p-4 gap-4">
 
           {/* Start */}
-          <div className="bg-slate-700/40 rounded-xl p-4 border border-slate-600">
+          <div className="bg-white/5 border border-white/10 rounded-xl p-4">
             <h2 className="text-sm font-semibold text-slate-200 mb-3">🚑 Start Location</h2>
             <button onClick={handleCurrentLocation} disabled={locating}
-              className="w-full flex items-center justify-center gap-2 mb-2 py-2 rounded-lg bg-blue-700/40 hover:bg-blue-700/70 border border-blue-600 text-blue-300 text-sm font-medium transition-colors disabled:opacity-50">
-              {locating ? '⏳ Locating...' : '📍 Use Current Location'}
+              className="w-full flex items-center justify-center gap-2 mb-2 py-2.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/40 border border-blue-600/50 text-blue-400 text-sm font-medium transition-all disabled:opacity-50">
+              {locating ? <><span className="w-3 h-3 border border-blue-400/30 border-t-blue-400 rounded-full animate-spin"></span> Locating...</> : '📍 Use Current Location'}
             </button>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">🔍</span>
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">🔍</span>
               <input type="text" value={startInput}
                 onChange={(e) => { setStartInput(e.target.value); setStart(null); }}
                 placeholder="Search start location..."
-                className="w-full bg-slate-800 border border-slate-600 focus:border-blue-500 outline-none rounded-lg pl-8 pr-3 py-2 text-sm text-white placeholder-slate-500" />
+                className="w-full bg-white/5 border border-white/10 focus:border-blue-500/70 outline-none rounded-xl pl-8 pr-3 py-2.5 text-sm text-white placeholder-slate-600 transition-colors" />
               {startSuggestions.length > 0 && (
-                <ul className="absolute z-50 top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                <ul className="absolute z-50 top-full left-0 right-0 mt-1 bg-[#0d1b2a] border border-white/10 rounded-xl shadow-2xl max-h-48 overflow-y-auto">
                   {startSuggestions.map((s) => (
                     <li key={s.place_id}>
                       <button onClick={() => handleSelectStart(s)}
-                        className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-700 border-b border-slate-700 last:border-0">
+                        className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/5 border-b border-white/5 last:border-0">
                         {s.display_name}
                       </button>
                     </li>
@@ -249,11 +269,11 @@ export default function Dashboard({ onLocationUpdate }) {
                 </ul>
               )}
             </div>
-            {start && <p className="text-xs text-emerald-400 mt-1.5">✓ {start[0].toFixed(5)}, {start[1].toFixed(5)}</p>}
+            {start && <p className="text-xs text-emerald-400 mt-1.5 flex items-center gap-1"><span className="w-1.5 h-1.5 bg-emerald-400 rounded-full"></span> {start[0].toFixed(5)}, {start[1].toFixed(5)}</p>}
           </div>
 
           {/* Destination */}
-          <div className="bg-slate-700/40 rounded-xl p-4 border border-slate-600" ref={destRef}>
+          <div className="bg-white/5 border border-white/10 rounded-xl p-4" ref={destRef}>
             <h2 className="text-sm font-semibold text-slate-200 mb-2">🏥 Destination Hospital</h2>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">🔍</span>
@@ -262,29 +282,29 @@ export default function Dashboard({ onLocationUpdate }) {
                 onFocus={() => setDestOpen(true)}
                 placeholder={start ? 'Search hospital name...' : 'Set start location first'}
                 disabled={!start}
-                className="w-full bg-slate-800 border border-slate-600 focus:border-emerald-500 outline-none rounded-lg pl-8 pr-3 py-2 text-sm text-white placeholder-slate-500 disabled:opacity-40" />
+                className="w-full bg-white/5 border border-white/10 focus:border-emerald-500/70 outline-none rounded-xl pl-8 pr-3 py-2.5 text-sm text-white placeholder-slate-600 disabled:opacity-30 transition-colors" />
               {destOpen && destSuggestions.length > 0 && (
-                <ul className="absolute z-50 top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-56 overflow-y-auto">
+                <ul className="absolute z-50 top-full left-0 right-0 mt-1 bg-[#0d1b2a] border border-white/10 rounded-xl shadow-2xl max-h-56 overflow-y-auto">
                   {destSuggestions.map((s) => (
                     <li key={s.id}>
                       <button onClick={() => handleSelectDest(s)}
-                        className="w-full text-left px-3 py-2 hover:bg-slate-700 border-b border-slate-700 last:border-0">
+                        className="w-full text-left px-3 py-2 hover:bg-white/5 border-b border-white/5 last:border-0">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-xs text-slate-200 truncate">{s.name}</span>
                           <div className="flex items-center gap-1 shrink-0">
                             {s.type === 'hospital' && s.distanceKm != null && (
-                              <span className="text-xs bg-slate-600 text-slate-300 px-1.5 py-0.5 rounded">{s.distanceKm} km</span>
+                              <span className="text-xs bg-white/10 text-slate-300 px-1.5 py-0.5 rounded-full">{s.distanceKm} km</span>
                             )}
                             {s.type === 'hospital' && s.emergency && (
-                              <span className="text-xs bg-red-900/60 text-red-300 px-1.5 py-0.5 rounded">🚨</span>
+                              <span className="text-xs bg-red-900/60 text-red-300 px-1.5 py-0.5 rounded-full">🚨</span>
                             )}
                             {s.type === 'nominatim' && (
-                              <span className="text-xs bg-blue-900/60 text-blue-300 px-1.5 py-0.5 rounded">🌐</span>
+                              <span className="text-xs bg-blue-900/40 text-blue-300 px-1.5 py-0.5 rounded-full">🌐</span>
                             )}
                           </div>
                         </div>
                         {s.type === 'nominatim' && (
-                          <div className="text-xs text-slate-500 truncate mt-0.5">{s.fullName}</div>
+                          <div className="text-xs text-slate-600 truncate mt-0.5">{s.fullName}</div>
                         )}
                       </button>
                     </li>
@@ -292,7 +312,7 @@ export default function Dashboard({ onLocationUpdate }) {
                 </ul>
               )}
               {destOpen && destInput.length >= 1 && destSuggestions.length === 0 && !hospitalsLoading && (
-                <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-xl px-3 py-2 text-xs text-slate-400">
+                <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-[#0d1b2a] border border-white/10 rounded-xl shadow-2xl px-3 py-2 text-xs text-slate-500">
                   No hospitals found for "{destInput}"
                 </div>
               )}
@@ -303,42 +323,160 @@ export default function Dashboard({ onLocationUpdate }) {
           {/* Get Route */}
           <div className="flex gap-2">
             <button onClick={handleFetchRoute} disabled={!start || !destination || loading}
-              className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold py-2.5 rounded-lg transition-colors">
-              {loading ? '⏳ Loading...' : '🗺️ Get Route'}
+              className="flex-1 bg-gradient-to-r from-red-700 to-red-600 hover:from-red-600 hover:to-red-500 disabled:opacity-30 disabled:cursor-not-allowed text-white text-sm font-bold py-3 rounded-xl transition-all shadow-lg shadow-red-900/30 flex items-center justify-center gap-2">
+              {loading
+                ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> Calculating...</>
+                : <><span>🗺️</span> Get Route</>}
             </button>
-            <button onClick={handleReset} className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white text-sm rounded-lg transition-colors">
-              Reset
+            <button onClick={handleReset} className="px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-400 hover:text-white text-sm rounded-xl transition-all">
+              ↺
             </button>
           </div>
 
-          {/* Stats Panel */}
+          {/* Accident Panel — admin controls OR driver read-only status */}
+          <div className="bg-red-950/30 border border-red-800/40 rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xs font-semibold text-red-400 uppercase tracking-wider">⚠️ Accident Zones</h2>
+              {routeData && <span className="text-xs text-red-600">{accidents.length} active</span>}
+            </div>
+
+            {/* ── DRIVER VIEW ── read-only status banner */}
+            {!isAdmin && (
+              <div className="flex flex-col gap-2">
+                {!routeData && (
+                  <p className="text-xs text-slate-500 text-center py-1">Generate route to monitor accidents</p>
+                )}
+                {routeData && accidentAlertStatus === null && accidents.length === 0 && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-900/20 border border-emerald-800/40">
+                    <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
+                    <span className="text-xs text-emerald-400">Route clear — no accidents detected</span>
+                  </div>
+                )}
+                {accidentAlertStatus === 'far' && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-900/30 border border-amber-700 animate-pulse">
+                    <span className="text-base">⚠️</span>
+                    <div>
+                      <div className="text-xs font-bold text-amber-300">Accident ahead – 1.5 km</div>
+                      <div className="text-xs text-amber-500">Prepare to slow down</div>
+                    </div>
+                  </div>
+                )}
+                {accidentAlertStatus === 'near' && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-900/50 border border-red-600 animate-pulse">
+                    <span className="text-base">🚨</span>
+                    <div>
+                      <div className="text-xs font-bold text-red-300">Accident ahead – 500 m</div>
+                      <div className="text-xs text-red-400">Clearing traffic now</div>
+                    </div>
+                  </div>
+                )}
+                {accidentAlertStatus === 'cleared' && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-900/30 border border-emerald-700">
+                    <span className="text-base">✅</span>
+                    <div className="text-xs font-bold text-emerald-300">Accident cleared</div>
+                  </div>
+                )}
+                {/* Show active accident zones (read-only) */}
+                {accidents.length > 0 && (
+                  <div className="flex flex-col gap-1 mt-1 max-h-28 overflow-y-auto">
+                    {accidents.map((acc) => (
+                      <div key={acc._id}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border
+                          ${activeAccident?._id === acc._id
+                            ? 'bg-red-900/50 border-red-600'
+                            : 'bg-white/5 border-white/10'}`}>
+                        <span className="text-xs">⚠️</span>
+                        <span className="text-xs text-slate-300">{acc.severity}</span>
+                        {activeAccident?._id === acc._id && (
+                          <span className="text-xs text-red-400 font-semibold ml-auto">CLEARING</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── ADMIN VIEW ── full simulation controls */}
+            {isAdmin && (
+              <>
+                {!routeData ? (
+                  <p className="text-xs text-slate-500 text-center py-2">Generate route to enable accident simulation</p>
+                ) : (
+                  <>
+                    <div className="flex gap-1.5 mb-3">
+                      {['LOW', 'MEDIUM', 'HIGH'].map((s) => (
+                        <button key={s} onClick={() => setSeverity(s)}
+                          className={`flex-1 text-xs py-1.5 rounded-lg border font-medium transition-all
+                            ${severity === s
+                              ? s === 'HIGH' ? 'bg-red-700 border-red-500 text-white'
+                                : s === 'LOW' ? 'bg-amber-700 border-amber-500 text-white'
+                                : 'bg-orange-700 border-orange-500 text-white'
+                              : 'bg-white/5 border-white/10 text-slate-500 hover:text-slate-300'}`}>
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => simulateOnRoute(routeData?.coords)}
+                      className="w-full py-2.5 rounded-xl border text-sm font-semibold transition-all mb-3 bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50">
+                      ⚠️ Simulate Accident
+                    </button>
+                    {accidents.length > 0 && (
+                      <div className="flex flex-col gap-1.5 max-h-32 overflow-y-auto">
+                        {accidents.map((acc) => (
+                          <div key={acc._id}
+                            className={`flex items-center justify-between px-3 py-2 rounded-lg border
+                              ${activeAccident?._id === acc._id
+                                ? 'bg-red-900/50 border-red-600 animate-pulse'
+                                : 'bg-white/5 border-white/10'}`}>
+                            <div>
+                              <span className="text-xs text-white font-medium">⚠️ {acc.severity}</span>
+                              <div className="text-xs text-slate-500">{acc.lat.toFixed(4)}, {acc.lng.toFixed(4)}</div>
+                              {activeAccident?._id === acc._id && (
+                                <div className="text-xs text-red-400 font-semibold">CLEARING TRAFFIC</div>
+                              )}
+                            </div>
+                            <button onClick={() => removeAccident(acc._id)}
+                              className="text-xs text-slate-600 hover:text-red-400 transition-colors px-1">✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </div>
           <StatsPanel
             routeData={routeData} ambulancePos={ambulancePos}
             signals={signals} stepIndex={stepIndex}
-            vehicles={vehicles}
+            vehicles={vehicles} preClearStatus={preClearStatus}
+            alertLog={alertLog}
           />
 
           {/* Route Info */}
-          <div className="bg-slate-700/40 rounded-xl p-4 border border-slate-600">
+          <div className="bg-white/5 border border-white/10 rounded-xl p-4">
             <h2 className="text-sm font-semibold text-slate-200 mb-3">🛣️ Route Details</h2>
             <RouteInfo
               routeData={routeData} signals={signals} stepIndex={stepIndex}
-              isRunning={isRunning} onStart={startSim} onStop={stopSim} loading={loading}
+              isRunning={isRunning} onStart={handleStart} onStop={handleStop} loading={loading}
               currentInstruction={currentInstruction}
             />
           </div>
 
           {/* Hospital List */}
           {hospitalsLoading && (
-            <div className="bg-slate-700/40 rounded-xl p-4 border border-slate-600 text-center">
-              <p className="text-xs text-slate-400 animate-pulse">🔍 Searching hospitals within 50 km...</p>
+            <div className="bg-white/5 border border-white/10 rounded-xl p-4 text-center">
+              <div className="w-5 h-5 border-2 border-emerald-600/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-2"></div>
+              <p className="text-xs text-slate-500">Searching hospitals within 50 km...</p>
             </div>
           )}
           {!hospitalsLoading && hospitalsError && (
-            <div className="bg-slate-700/40 rounded-xl p-4 border border-red-800 text-center">
+            <div className="bg-red-900/10 border border-red-800/40 rounded-xl p-4 text-center">
               <p className="text-xs text-red-400 mb-2">⚠️ Could not load hospitals.</p>
               <button onClick={() => lastStartCoords && loadHospitals(...lastStartCoords)}
-                className="text-xs bg-red-700/50 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg border border-red-600 transition-colors">
+                className="text-xs bg-red-700/30 hover:bg-red-700/60 text-red-300 px-3 py-1.5 rounded-lg border border-red-700/50 transition-colors">
                 🔄 Retry
               </button>
             </div>
@@ -348,16 +486,19 @@ export default function Dashboard({ onLocationUpdate }) {
           )}
 
           {/* Legend */}
-          <div className="bg-slate-700/40 rounded-xl p-4 border border-slate-600 mt-auto">
-            <h2 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Legend</h2>
-            <div className="flex flex-col gap-1.5 text-xs text-slate-300">
+          <div className="bg-white/3 border border-white/8 rounded-xl p-3 mt-auto">
+            <h2 className="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wider">Map Legend</h2>
+            <div className="grid grid-cols-2 gap-1 text-xs text-slate-400">
               <span>🚑 Ambulance</span>
               <span>🏥 Hospital</span>
-              <span>🚗 Simulated Vehicle</span>
-              <span>🟢 Signal Green (clear)</span>
-              <span>🔴 Signal Red (stop)</span>
-              <span className="text-blue-400">━━ Route</span>
-              <span className="text-red-400">━━ High Traffic Zone</span>
+              <span>🚗 Vehicle</span>
+              <span>🚦 Signal</span>
+              <span className="text-emerald-400">🟢 Green (priority)</span>
+              <span className="text-amber-400">🟡 Yellow (pre-clear)</span>
+              <span className="text-red-400">🔴 Red (stop)</span>
+              <span className="text-purple-400">◆ Virtual signal</span>
+              <span className="text-blue-400">━ Route</span>
+              <span className="text-amber-400">⚠️ Accident</span>
             </div>
           </div>
         </aside>
@@ -371,6 +512,9 @@ export default function Dashboard({ onLocationUpdate }) {
             signals={signals} ambulancePos={ambulancePos}
             hospitals={hospitals} vehicles={vehicles}
             onMapClick={handleMapClick}
+            accidents={accidents}
+            activeAccident={activeAccident}
+            isRunning={isRunning}
           />
         </main>
       </div>
