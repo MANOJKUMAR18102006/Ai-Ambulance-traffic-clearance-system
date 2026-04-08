@@ -7,6 +7,18 @@ function getTrafficLevel() {
   return TRAFFIC_LEVELS[Math.floor(Math.random() * 3)];
 }
 
+/*
+  Pre-clearance distance by density:
+  HIGH   → start clearing 3 km ahead (long queue, needs time to clear)
+  MEDIUM → start clearing 2 km ahead
+  LOW    → start clearing 1 km ahead (no queue, immediate green)
+  NONE   → virtual signal, immediate green at 0.5 km
+*/
+const PRE_CLEAR_KM = { high: 3.0, medium: 2.0, low: 1.0, none: 0.5 };
+
+// Extra green hold time after ambulance passes (seconds simulated as ms)
+const GREEN_HOLD_MS = { high: 6000, medium: 3000, low: 1000, none: 500 };
+
 function generateSignalsOnRoute(routeCoords) {
   if (!routeCoords || routeCoords.length < 2) return [];
   const signals = [];
@@ -14,16 +26,43 @@ function generateSignalsOnRoute(routeCoords) {
   const densities = ['low', 'medium', 'high'];
   for (let i = step; i < routeCoords.length - 1; i += step) {
     const density = densities[Math.floor(Math.random() * densities.length)];
+    // Estimate queue length: high=12 vehicles, medium=6, low=2
+    const queueLength = density === 'high' ? 12 : density === 'medium' ? 6 : 2;
     signals.push({
       id: `sig_${i}`,
       lat: routeCoords[i][0],
       lng: routeCoords[i][1],
       status: 'red',
       trafficDensity: density,
+      queueLength,
       greenDuration: density === 'high' ? 15 : density === 'medium' ? 10 : 6,
+      isVirtual: false,
     });
   }
   return signals;
+}
+
+// Generate virtual signals at midpoints between real signals (uncontrolled intersections)
+function generateVirtualSignals(routeCoords, realSignals) {
+  if (!routeCoords || realSignals.length < 2) return [];
+  const virtuals = [];
+  for (let i = 0; i < realSignals.length - 1; i++) {
+    const a = realSignals[i];
+    const b = realSignals[i + 1];
+    const midLat = (a.lat + b.lat) / 2;
+    const midLng = (a.lng + b.lng) / 2;
+    virtuals.push({
+      id: `vsig_${i}`,
+      lat: midLat,
+      lng: midLng,
+      status: 'red',
+      trafficDensity: 'none',
+      queueLength: 0,
+      greenDuration: 3,
+      isVirtual: true,
+    });
+  }
+  return virtuals;
 }
 
 function generateTrafficZones(routeCoords) {
@@ -47,7 +86,6 @@ function generateTrafficZones(routeCoords) {
   return zones;
 }
 
-// Generate simulated vehicles scattered near route points
 function generateVehicles(routeCoords) {
   if (!routeCoords || routeCoords.length < 4) return [];
   const vehicles = [];
@@ -66,11 +104,17 @@ function generateVehicles(routeCoords) {
   return vehicles;
 }
 
-// GREEN when ambulance is within 1000m ahead, RED once passed
+/*
+  Traffic-aware signal state computation:
+  - Each signal has its own pre-clearance distance based on density
+  - HIGH density → green starts 3km ahead to allow queue to clear
+  - Signal turns RED 100m after ambulance passes
+*/
 function computeSignalStates(signals, ambulanceLat, ambulanceLng) {
   return signals.map((sig) => {
     const dist = haversine(ambulanceLat, ambulanceLng, sig.lat, sig.lng);
-    const status = dist <= 1.0 ? 'green' : 'red';
+    const preClearKm = PRE_CLEAR_KM[sig.trafficDensity] || PRE_CLEAR_KM.low;
+    const status = dist <= preClearKm ? 'green' : 'red';
     return { ...sig, status };
   });
 }
@@ -88,8 +132,10 @@ function haversine(lat1, lng1, lat2, lng2) {
 module.exports = {
   getTrafficLevel,
   generateSignalsOnRoute,
+  generateVirtualSignals,
   generateTrafficZones,
   generateVehicles,
   computeSignalStates,
+  PRE_CLEAR_KM,
   haversine,
 };

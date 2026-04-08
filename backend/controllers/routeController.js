@@ -1,5 +1,5 @@
 const { getRoute } = require('../services/orsService');
-const { getTrafficLevel, generateSignalsOnRoute, generateTrafficZones, generateVehicles } = require('../services/aiService');
+const { getTrafficLevel, generateSignalsOnRoute, generateVirtualSignals, generateTrafficZones, generateVehicles } = require('../services/aiService');
 const Route = require('../models/Route');
 const Signal = require('../models/Signal');
 
@@ -13,7 +13,9 @@ async function fetchRoute(req, res) {
 
     const route = await getRoute(startLng, startLat, endLng, endLat);
     const traffic = getTrafficLevel();
-    const signals = generateSignalsOnRoute(route.coords);
+    const realSignals = generateSignalsOnRoute(route.coords);
+    const virtualSignals = generateVirtualSignals(route.coords, realSignals);
+    const signals = [...realSignals, ...virtualSignals];
     const trafficZones = generateTrafficZones(route.coords);
     const vehicles = generateVehicles(route.coords);
 

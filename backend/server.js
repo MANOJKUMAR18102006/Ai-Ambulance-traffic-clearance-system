@@ -14,6 +14,7 @@ app.use('/api/route', require('./routes/route'));
 app.use('/api/hospitals', require('./routes/hospital'));
 app.use('/api/traffic', require('./routes/traffic'));
 app.use('/api/signal', require('./routes/signal'));
+app.use('/api/accident', require('./routes/accident'));
 
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
