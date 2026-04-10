@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "AmbulanceAI",
+    "slug": "ambulance-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0f1e"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ambulanceai.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app uses your location to set the ambulance start position.",
+        "NSLocationAlwaysUsageDescription": "This app uses your location to track the ambulance in real-time."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a0f1e"
+      },
+      "package": "com.ambulanceai.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-location"
+    ],
+    "scheme": "ambulanceai",
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
